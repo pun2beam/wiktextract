@@ -5,6 +5,18 @@
 # setter method; see wiktwords.
 from collections.abc import Callable, Sequence
 
+
+def _split_args(args: Sequence[str]) -> tuple[list[str], dict[str, str]]:
+    positional: list[str] = []
+    named: dict[str, str] = {}
+    for arg in args:
+        if "=" in arg:
+            key, value = arg.split("=", 1)
+            named[key.strip()] = value
+        else:
+            positional.append(arg)
+    return positional, named
+
 template_override_fns = {}
 
 # https://stackoverflow.com/a/63071396
@@ -50,3 +62,58 @@ def egy_glyph_img(args: Sequence[str]) -> str:
     if "=" not in args[1]:
         return "«" + args[1] + "»"
     return "EGY-GLYPH-IMAGE-ERROR"
+
+
+@reg("section link")
+def section_link(args: Sequence[str]) -> str:
+    """Provide a lightweight replacement for {{section link}}.
+
+    The Lua implementation on Wiktionary primarily creates wikilinks to
+    sections of policy or formatting pages.  The full Lua dependency tree is
+    difficult to reproduce, so we generate a simplified link that preserves the
+    target and human-readable label.
+    """
+
+    if len(args) <= 1:
+        return ""
+
+    positional, named = _split_args(args[1:])
+
+    target = named.get("page") or named.get("1")
+    if positional:
+        target = positional[0]
+
+    if not target:
+        return ""
+
+    section = named.get("section")
+    display = named.get("display") or named.get("text")
+
+    if len(positional) > 1 and section is None:
+        section = positional[1]
+    if len(positional) > 2 and not display:
+        display = positional[2]
+
+    if "#" in target:
+        page_name, anchor = target.split("#", 1)
+        if not section:
+            section = anchor
+        target = page_name
+    elif named.get("anchor") and not section:
+        section = named["anchor"]
+
+    if section:
+        link_target = f"{target}#{section}"
+    else:
+        link_target = target
+
+    if not display:
+        display = section or target
+        if ":" in display:
+            display = display.split(":", 1)[-1]
+
+    display = display.strip()
+    if not display:
+        return f"[[{link_target}]]"
+
+    return f"[[{link_target}|{display}]]"
