@@ -5,6 +5,7 @@
 import copy
 import html
 import re
+import textwrap
 from collections import defaultdict
 from functools import partial
 from typing import (
@@ -2284,12 +2285,14 @@ def parse_language(
                 added = True
             # if gloss not in sense_data.get("raw_glosses", ()):
             #     data_append(sense_data, "raw_glosses", gloss)
+            attached_examples: list[ExampleData] | None = None
             if i == 0 and examples:
                 # In a multi-line gloss, associate examples
                 # with only one of them.
                 # XXX or you could use gloss_i == len(indexed_subglosses)
                 # to associate examples with the *last* one.
                 data_extend(sense_data, "examples", examples)
+                attached_examples = examples
             if gloss.startswith("; ") and gloss_i > 0:
                 gloss = gloss[1:].strip()
             # If the gloss starts with †, mark as obsolete
@@ -2446,6 +2449,34 @@ def parse_language(
                     elif "form-of" in tags:
                         data_extend(sense_data, "tags", tags)
                         data_append(sense_data, "form_of", dt)
+
+            if attached_examples:
+                gloss_summary_parts = list(sense_data.get("glosses", ()))
+                if not gloss_summary_parts:
+                    gloss_summary_parts = list(sense_base.get("glosses", ()))
+                if not gloss_summary_parts:
+                    gloss_summary = "<no gloss>"
+                else:
+                    gloss_summary = "; ".join(gloss_summary_parts)
+                example_snippets = []
+                for example_data in attached_examples:
+                    example_text = example_data.get("text") or ""
+                    if example_text:
+                        normalized = " ".join(example_text.split())
+                    else:
+                        normalized = ""
+                    example_snippets.append(
+                        textwrap.shorten(normalized, width=120, placeholder="…")
+                    )
+                examples_desc = ", ".join(example_snippets) if example_snippets else "(no text)"
+                wxr.wtp.debug(
+                    "Associating {} example(s) with gloss '{}': {}".format(
+                        len(attached_examples),
+                        textwrap.shorten(gloss_summary, width=80, placeholder="…"),
+                        examples_desc,
+                    ),
+                    sortid="page/parse_sense/examples/20240601",
+                )
 
         if len(sense_data) == 0:
             if len(sense_base.get("tags", [])) == 0:
@@ -4055,6 +4086,38 @@ def parse_language(
                     if ruby:
                         dt["ruby"] = ruby
                     examples.append(dt)
+
+        if examples:
+            gloss_summary_parts = list(sense_base.get("glosses", ()))
+            if not gloss_summary_parts and "raw_glosses" in sense_base:
+                gloss_summary_parts = list(sense_base.get("raw_glosses", ()))
+            if not gloss_summary_parts:
+                gloss_summary = "<no gloss>"
+            else:
+                gloss_summary = "; ".join(gloss_summary_parts)
+            snippet_parts = []
+            for example_data in examples:
+                text_value = example_data.get("text") or ""
+                if text_value:
+                    normalized_text = " ".join(text_value.split())
+                else:
+                    normalized_text = ""
+                snippet = textwrap.shorten(
+                    normalized_text, width=120, placeholder="…"
+                )
+                example_type = example_data.get("type") or "example"
+                if snippet:
+                    snippet_parts.append(f"[{example_type}] {snippet}")
+                else:
+                    snippet_parts.append(f"[{example_type}] (no text)")
+            wxr.wtp.debug(
+                "Extracted {} example(s) for gloss '{}': {}".format(
+                    len(examples),
+                    textwrap.shorten(gloss_summary, width=80, placeholder="…"),
+                    "; ".join(snippet_parts),
+                ),
+                sortid="page/extract_examples/20240601",
+            )
 
         return examples
 
