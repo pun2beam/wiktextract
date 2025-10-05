@@ -39,3 +39,17 @@ Risk/Impact
 - tools/repro_lay.py
 - tools/report_pos_changes.py
 - docs/PR_lay_fix.md
+
+POS change summary
+-------------------
+```
+Word         Changed   OldUnique   NewUnique
+--------------------------------------------
+set                0           0           0
+run                0           0           0
+lie                0           0           0
+lead               0           0           0
+fast               0           0           0
+fair               0           0           0
+lay                1           1           1
+```
