@@ -12,6 +12,7 @@ heading changes.
 
 from __future__ import annotations
 
+import os
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Iterable
@@ -19,6 +20,26 @@ from typing import Iterable
 from lxml import html
 
 from mediawiki_langcodes import name_to_code
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Return True/False for an environment variable flag."""
+
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"", "0", "false", "no", "off"}:
+        return False
+    return True
+
+
+if "WIKTEXTRACT_STRICT_SENSE_BOUNDARY" in os.environ:
+    _STRICT_SENSE_BOUNDARY = _env_flag("WIKTEXTRACT_STRICT_SENSE_BOUNDARY", True)
+elif "PARSER_STRICT_SENSE_BOUNDARY" in os.environ:
+    _STRICT_SENSE_BOUNDARY = _env_flag("PARSER_STRICT_SENSE_BOUNDARY", True)
+else:
+    _STRICT_SENSE_BOUNDARY = True
 
 
 @dataclass
@@ -80,6 +101,8 @@ def _extract_gloss(li: html.HtmlElement) -> str:
 
 
 def _paths_match(sense_path: tuple[str, ...], example_path: tuple[str, ...]) -> bool:
+    if not _STRICT_SENSE_BOUNDARY:
+        return True
     if not sense_path or not example_path:
         return False
     min_len = min(len(sense_path), len(example_path))
