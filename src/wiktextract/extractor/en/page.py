@@ -4,6 +4,8 @@
 
 import copy
 import html
+import logging
+import os
 import re
 import textwrap
 from collections import defaultdict
@@ -11,6 +13,7 @@ from functools import partial
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Iterable,
     Optional,
     Set,
@@ -97,6 +100,196 @@ from .unsupported_titles import unsupported_title_map
 # When determining whether a string is 'english', classify_desc
 # might return 'taxonomic' which is English text 99% of the time.
 ENGLISH_TEXTS = ("english", "taxonomic")
+
+
+_DEBUG_EXAMPLE_ATTACH = bool(os.environ.get("WXT_DEBUG"))
+_EXAMPLE_LOGGER = logging.getLogger("wiktextract")
+if _DEBUG_EXAMPLE_ATTACH:
+    _EXAMPLE_LOGGER.setLevel(logging.INFO)
+    if not _EXAMPLE_LOGGER.handlers:
+        _handler = logging.StreamHandler()
+        _handler.setLevel(logging.INFO)
+        _handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s: %(message)s")
+        )
+        _EXAMPLE_LOGGER.addHandler(_handler)
+    _EXAMPLE_LOGGER.propagate = False
+
+
+def _shorten_for_debug(text: str, limit: int) -> str:
+    text = text or ""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def _describe_node_for_debug(node: WikiNode | HTMLNode | None) -> str:
+    if node is None:
+        return "<none>"
+    if isinstance(node, HTMLNode):
+        cls = node.attrs.get("class") if hasattr(node, "attrs") else None
+        cls_part = f" class='{cls}'" if cls else ""
+        return f"<{node.tag}{cls_part}>"
+    if isinstance(node, WikiNode):
+        if node.kind == NodeKind.LIST:
+            marker = node.sarg or ""
+            if marker.startswith("#"):
+                tag = "ol"
+            elif marker.startswith("*"):
+                tag = "ul"
+            elif marker.startswith(":"):
+                tag = "dl"
+            else:
+                tag = node.kind.name.lower()
+            return f"<{tag} sarg='{marker}'>"
+        if node.kind == NodeKind.LIST_ITEM:
+            return "<li>"
+        return f"<{node.kind.name.lower()}>"
+    return str(node)
+
+
+def _collect_nearby_tags(node: WikiNode | HTMLNode | None) -> dict[str, Any]:
+    tags: set[str] = set()
+    classes: set[str] = set()
+    has_quote_container = False
+    has_blockquote = False
+    if node is None:
+        return {
+            "tags": tags,
+            "classes": classes,
+            "has_quote_container": has_quote_container,
+            "has_blockquote": has_blockquote,
+        }
+
+    queue: list[WikiNode | HTMLNode] = []
+    if isinstance(node, (WikiNode, HTMLNode)):
+        queue.append(node)
+    depth = 0
+    while queue and depth < 4:
+        depth += 1
+        next_queue: list[WikiNode | HTMLNode] = []
+        for current in queue:
+            if isinstance(current, HTMLNode):
+                tags.add(current.tag.lower())
+                cls_text = current.attrs.get("class", "")
+                for cls in cls_text.split():
+                    if cls:
+                        classes.add(cls)
+                        if cls == "wikt-quote-container":
+                            has_quote_container = True
+                if current.tag.lower() == "blockquote":
+                    has_blockquote = True
+            elif isinstance(current, WikiNode):
+                tags.add(current.kind.name.lower())
+            children = getattr(current, "children", None)
+            if isinstance(children, (list, tuple)):
+                for child in children:
+                    if isinstance(child, (WikiNode, HTMLNode)):
+                        next_queue.append(child)
+        queue = next_queue
+
+    return {
+        "tags": tags,
+        "classes": classes,
+        "has_quote_container": has_quote_container,
+        "has_blockquote": has_blockquote,
+    }
+
+
+def _build_example_meta(
+    source: str,
+    container_node: WikiNode | HTMLNode | None,
+    item_node: WikiNode | HTMLNode | None,
+    extra: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    meta: dict[str, Any] = {
+        "source": source,
+        "container": _describe_node_for_debug(container_node),
+        "item": _describe_node_for_debug(item_node),
+    }
+    meta.update(_collect_nearby_tags(item_node))
+    if extra:
+        meta.update(extra)
+    return meta
+
+
+def _current_heading_path(
+    language: str,
+    stack: list[str],
+    pos: str | None,
+) -> list[str]:
+    path: list[str] = []
+    if language:
+        path.append(language)
+    for heading in stack:
+        if heading and (not path or heading != path[-1]):
+            path.append(heading)
+    if pos and (not path or pos != path[-1]):
+        path.append(pos)
+    return path
+
+
+def _emit_example_debug_logs(
+    wxr: WiktextractContext,
+    language: str,
+    stack: list[str],
+    pos: str | None,
+    sense_data: SenseData,
+    sense_base: SenseData,
+    gloss: str,
+    examples: list[ExampleData],
+    example_meta: dict[int, dict[str, Any]],
+    sense_index: int,
+) -> None:
+    if not _DEBUG_EXAMPLE_ATTACH:
+        return
+
+    heading_path = _current_heading_path(language, stack, pos)
+    gloss_text = gloss or ""
+    if not gloss_text:
+        glosses = sense_data.get("glosses") or sense_base.get("glosses") or []
+        if isinstance(glosses, list) and glosses:
+            gloss_text = glosses[0]
+        elif isinstance(glosses, str):
+            gloss_text = glosses
+    raw_glosses = sense_data.get("raw_glosses") or sense_base.get("raw_glosses")
+    if not gloss_text and raw_glosses:
+        if isinstance(raw_glosses, list) and raw_glosses:
+            gloss_text = raw_glosses[0]
+        elif isinstance(raw_glosses, str):
+            gloss_text = raw_glosses
+    sense_ids = sense_data.get("senseid") or sense_base.get("senseid") or []
+    if isinstance(sense_ids, str):
+        sense_ids = [sense_ids]
+
+    word = wxr.word or wxr.wtp.title or ""
+    for example in examples:
+        text_value = example.get("text") or example.get("translation") or ""
+        meta = example_meta.get(id(example), {})
+        tags = sorted(meta.get("tags", []))
+        classes = sorted(meta.get("classes", []))
+        specials: list[str] = []
+        if meta.get("has_blockquote"):
+            specials.append("blockquote")
+        if meta.get("has_quote_container"):
+            specials.append("wikt-quote-container")
+        _EXAMPLE_LOGGER.info(
+            "[WXT] attach-example word=%s heading=%s pos=%s sense_index=%s "
+            "sense_ids=%s gloss=%s example=%s structure=%s tags=%s classes=%s "
+            "special=%s",
+            word,
+            heading_path,
+            pos,
+            sense_index,
+            sense_ids,
+            _shorten_for_debug(gloss_text, 80),
+            _shorten_for_debug(text_value, 120),
+            meta.get("item"),
+            tags,
+            classes,
+            specials,
+        )
+
 
 # Matches head tag
 HEAD_TAG_RE = re.compile(
@@ -2234,8 +2427,9 @@ def parse_language(
         # sense_base is not contaminated with meta-data from
         # example entries for *this* gloss.
         examples = []
+        example_meta: dict[int, dict[str, Any]] = {}
         if wxr.config.capture_examples:
-            examples = extract_examples(others, sense_base)
+            examples, example_meta = extract_examples(others, sense_base)
 
         # push_sense() succeeded somewhere down-river, so skip this level
         if added:
@@ -2291,6 +2485,19 @@ def parse_language(
                 # with only one of them.
                 # XXX or you could use gloss_i == len(indexed_subglosses)
                 # to associate examples with the *last* one.
+                current_index = len(pos_data.get("senses", ())) + len(sense_datas)
+                _emit_example_debug_logs(
+                    wxr,
+                    language,
+                    stack,
+                    pos,
+                    sense_data,
+                    sense_base,
+                    gloss,
+                    examples,
+                    example_meta,
+                    current_index,
+                )
                 data_extend(sense_data, "examples", examples)
                 attached_examples = examples
             if gloss.startswith("; ") and gloss_i > 0:
@@ -3696,12 +3903,13 @@ def parse_language(
 
     def extract_examples(
         others: list[WikiNode], sense_base: SenseData
-    ) -> list[ExampleData]:
+    ) -> tuple[list[ExampleData], dict[int, dict[str, Any]]]:
         """Parses through a list of definitions and quotes to find examples.
         Returns a list of example dicts to be added to sense data. Adds
         meta-data, mostly categories, into sense_base."""
         assert isinstance(others, list)
         examples: list[ExampleData] = []
+        example_meta: dict[int, dict[str, Any]] = {}
 
         for sub in others:
             if not sub.sarg.endswith((":", "*")):
@@ -3711,6 +3919,18 @@ def parse_language(
                     continue
                 if item.kind != NodeKind.LIST_ITEM:
                     continue
+                
+                def record_from_list(
+                    example_data: ExampleData,
+                    extra_meta: Optional[dict[str, Any]] = None,
+                ) -> None:
+                    example_meta[id(example_data)] = _build_example_meta(
+                        "template-list-item",
+                        sub,
+                        item,
+                        extra_meta,
+                    )
+
                 usex_type = None
                 example_template_args = []
                 example_template_names = []
@@ -3719,7 +3939,11 @@ def parse_language(
                 # Bypass this function when parsing Chinese, Japanese and
                 # quotation templates.
                 new_example_lists = extract_example_list_item(
-                    wxr, item, sense_base, ExampleData(raw_tags=[], tags=[])
+                    wxr,
+                    item,
+                    sense_base,
+                    ExampleData(raw_tags=[], tags=[]),
+                    record_debug_meta=record_from_list,
                 )
                 if len(new_example_lists) > 0:
                     examples.extend(new_example_lists)
@@ -4086,6 +4310,15 @@ def parse_language(
                     if ruby:
                         dt["ruby"] = ruby
                     examples.append(dt)
+                    example_meta[id(dt)] = _build_example_meta(
+                        "plain-text",
+                        sub,
+                        item,
+                        {
+                            "usex_type": usex_type,
+                            "templates": example_template_names[:],
+                        },
+                    )
 
         if examples:
             gloss_summary_parts = list(sense_base.get("glosses", ()))
@@ -4119,7 +4352,7 @@ def parse_language(
                 sortid="page/extract_examples/20240601",
             )
 
-        return examples
+        return examples, example_meta
 
     # Main code of parse_language()
     # Process the section

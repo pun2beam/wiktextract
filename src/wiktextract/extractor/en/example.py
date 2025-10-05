@@ -1,5 +1,7 @@
 from copy import deepcopy
 
+from typing import Any, Callable, Optional
+
 from wikitextprocessor import HTMLNode, NodeKind, TemplateNode, WikiNode
 
 from ...page import clean_node
@@ -15,27 +17,37 @@ def extract_example_list_item(
     list_item: WikiNode,
     sense_data: SenseData,
     parent_data: ExampleData,
+    record_debug_meta: Optional[
+        Callable[[ExampleData, Optional[dict[str, Any]]], None]
+    ] = None,
 ) -> list[ExampleData]:
     examples = []
     for template_node in list_item.find_child(NodeKind.TEMPLATE):
         if template_node.template_name in ["zh-x", "zh-usex", "zh-q", "zh-co"]:
-            examples.extend(
-                extract_template_zh_x(
-                    wxr,
-                    template_node,
-                    sense_data,
-                    parent_data,
-                )
+            new_examples = extract_template_zh_x(
+                wxr,
+                template_node,
+                sense_data,
+                parent_data,
             )
+            if record_debug_meta:
+                for example in new_examples:
+                    record_debug_meta(
+                        example, {"template": template_node.template_name}
+                    )
+            examples.extend(new_examples)
         elif template_node.template_name in ["ja-usex", "ja-x", "ja-ux"]:
-            examples.append(
-                extract_template_ja_usex(
-                    wxr,
-                    template_node,
-                    sense_data,
-                    parent_data,
-                )
+            example = extract_template_ja_usex(
+                wxr,
+                template_node,
+                sense_data,
+                parent_data,
             )
+            examples.append(example)
+            if record_debug_meta:
+                record_debug_meta(
+                    example, {"template": template_node.template_name}
+                )
         elif (
             template_node.template_name.startswith(("quote-", "RQ:"))
             or template_node.template_name == "quote"
@@ -50,11 +62,19 @@ def extract_example_list_item(
                             q_example[key] = []
                     examples.extend(
                         extract_example_list_item(
-                            wxr, next_list_item, sense_data, q_example
+                            wxr,
+                            next_list_item,
+                            sense_data,
+                            q_example,
+                            record_debug_meta=record_debug_meta,
                         )
                     )
             else:
                 examples.append(q_example)
+                if record_debug_meta:
+                    record_debug_meta(
+                        q_example, {"template": template_node.template_name}
+                    )
         elif template_node.template_name in [
             "ux",
             "usex",
@@ -73,14 +93,17 @@ def extract_example_list_item(
             copy_of_parent_data = deepcopy(parent_data)
             if template_node.template_name in ("collocation", "co", "coi"):
                 copy_of_parent_data["tags"].append("collocation")
-            examples.append(
-                extract_ux_template(
-                    wxr,
-                    template_node,
-                    sense_data,
-                    copy_of_parent_data,
-                )
+            example = extract_ux_template(
+                wxr,
+                template_node,
+                sense_data,
+                copy_of_parent_data,
             )
+            examples.append(example)
+            if record_debug_meta:
+                record_debug_meta(
+                    example, {"template": template_node.template_name}
+                )
 
     return examples
 
