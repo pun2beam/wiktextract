@@ -405,6 +405,19 @@ machine-readable)
 * --inflection_tables_file: extract and expand tables into this file as wikitext; use this to create tests
 * --help: displays help text (with some more options than listed here)
 
+### Environment variables
+
+The extractor exposes a small number of environment toggles for
+advanced workflows.  When using the REST/Parsoid HTML parser the
+``WIKTEXTRACT_STRICT_SENSE_BOUNDARY`` flag controls how usage examples
+are matched to their breadcrumb trail.  By default the flag is treated
+as enabled, which enforces that examples stay within the sense that
+their breadcrumb identifies.  Setting ``WIKTEXTRACT_STRICT_SENSE_BOUNDARY=0``
+relaxes this behaviour and allows the parser to fall back to the most
+recently seen sense when breadcrumbs cannot be matched (restoring the
+pre-2.0 behaviour).  Any other truthy value keeps the strict boundary
+checks on.
+
 ## Calling the library
 
 While this package has been mostly intended to be used using the
