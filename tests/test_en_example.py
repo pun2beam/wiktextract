@@ -105,7 +105,8 @@ class TestEnExample(TestCase):
             10,
             """<span class=\"h-quotation\">"
             "<span class=\"e-quotation\" lang=\"de\">{{{origtext|}}}</span>"
-            "<span class=\"e-translation\">{{{passage|}}}</span>"
+            "<span class=\"e-quotation\" lang=\"en\">{{{passage|}}}</span>"
+            "<span class=\"e-translation\">{{{translation|}}}</span>"
             "</span>""",
         )
         page_data = parse_page(
@@ -114,7 +115,7 @@ class TestEnExample(TestCase):
             """==English==
 ===Verb===
 # gloss
-#: {{quote-book|author=Alice Stern|origtext=de:Eine ausgewachsene Henne '''legt''' Eier.|passage=A grown hen lays eggs.}}
+#: {{quote-book|author=Alice Stern|origtext=de:Eine ausgewachsene Henne <b>legt</b> Eier.|passage=A grown hen <b>lays</b> eggs.|translation=A grown hen lays eggs.}}
 """,
         )
         self.assertEqual(
@@ -122,6 +123,7 @@ class TestEnExample(TestCase):
             [
                 {
                     "text": "A grown hen lays eggs.",
+                    "bold_text_offsets": [(12, 16)],
                     "english": "A grown hen lays eggs.",
                     "translation": "A grown hen lays eggs.",
                     "type": "example",
