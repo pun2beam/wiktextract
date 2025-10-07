@@ -1,4 +1,5 @@
 from copy import deepcopy
+from typing import Any, cast
 
 from wikitextprocessor import HTMLNode, NodeKind, TemplateNode, WikiNode
 
@@ -104,22 +105,37 @@ def extract_quote_templates(
     example_data = ExampleData(
         text="", ref="", english="", roman="", type="quote"
     )
+    quotation_spans: list[dict[str, Any]] = []
     for span_tag in expanded_node.find_html_recursively("span"):
         span_class = span_tag.attrs.get("class", "")
         if "cited-source" == span_class:
             example_data["ref"] = clean_node(wxr, None, span_tag)
         elif "e-quotation" in span_class:
             ruby_data, node_without_ruby = extract_ruby(wxr, span_tag)
-            if len(ruby_data) > 0:
-                example_data["ruby"] = ruby_data
-            example_data["text"] = clean_node(wxr, None, node_without_ruby)
+            clean_text = clean_node(wxr, None, node_without_ruby)
+            temp_example: dict[str, Any] = {}
             calculate_bold_offsets(
                 wxr,
                 span_tag,
-                example_data["text"],
-                example_data,
+                clean_text,
+                temp_example,
                 "bold_text_offsets",
             )
+            lang_attr = (
+                span_tag.attrs.get("lang")
+                or span_tag.attrs.get("xml:lang")
+                or ""
+            )
+            quotation_entry: dict[str, Any] = {
+                "text": clean_text,
+                "lang": lang_attr,
+                "bold_text_offsets": temp_example.get(
+                    "bold_text_offsets", []
+                ),
+            }
+            if len(ruby_data) > 0:
+                quotation_entry["ruby"] = ruby_data
+            quotation_spans.append(quotation_entry)
         elif "e-translation" in span_class:
             example_data["translation"] = clean_node(
                 wxr, None, span_tag
@@ -146,11 +162,29 @@ def extract_quote_templates(
             "bold_roman_offsets",
         )
         break
-    if (
-        example_data.get("translation")
-        and origtext_lang is not None
-        and not origtext_lang.startswith("en")
-    ):
+    selected_quotation: dict[str, Any] | None = None
+    if len(quotation_spans) > 0:
+        selected_quotation = quotation_spans[-1]
+    if origtext_lang is not None and not origtext_lang.startswith("en"):
+        for quotation_entry in quotation_spans:
+            lang_attr = quotation_entry.get("lang", "")
+            if not isinstance(lang_attr, str):
+                continue
+            if len(lang_attr) == 0 or lang_attr.startswith("en"):
+                selected_quotation = quotation_entry
+                break
+
+    if selected_quotation is not None:
+        example_data["text"] = cast(str, selected_quotation.get("text", ""))
+        ruby_value = selected_quotation.get("ruby")
+        if ruby_value:
+            example_data["ruby"] = ruby_value
+        bold_offsets = selected_quotation.get("bold_text_offsets")
+        if isinstance(bold_offsets, list) and len(bold_offsets) > 0:
+            example_data["bold_text_offsets"] = cast(
+                list[tuple[int, int]], bold_offsets
+            )
+    elif example_data.get("translation"):
         example_data["text"] = example_data["translation"]
         example_data["bold_text_offsets"] = example_data.get(
             "bold_translation_offsets", []
