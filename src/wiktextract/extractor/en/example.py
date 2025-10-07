@@ -88,6 +88,15 @@ def extract_example_list_item(
 def extract_quote_templates(
     wxr: WiktextractContext, node: TemplateNode, sense_data: SenseData
 ) -> ExampleData:
+    origtext_lang = None
+    origtext_param = node.template_parameters.get("origtext")
+    if origtext_param is not None:
+        origtext_value = wxr.wtp.node_to_wikitext(origtext_param).strip()
+        if ":" in origtext_value:
+            maybe_lang, _colon, _rest = origtext_value.partition(":")
+            maybe_lang = maybe_lang.strip()
+            if maybe_lang:
+                origtext_lang = maybe_lang
     expanded_node = wxr.wtp.parse(
         wxr.wtp.node_to_wikitext(node), expand_all=True
     )
@@ -137,6 +146,15 @@ def extract_quote_templates(
             "bold_roman_offsets",
         )
         break
+    if (
+        example_data.get("translation")
+        and origtext_lang is not None
+        and not origtext_lang.startswith("en")
+    ):
+        example_data["text"] = example_data["translation"]
+        example_data["bold_text_offsets"] = example_data.get(
+            "bold_translation_offsets", []
+        )
     clean_example_empty_data(example_data)
     return example_data
 

@@ -98,3 +98,33 @@ class TestEnExample(TestCase):
                 }
             ],
         )
+
+    def test_quote_origtext_non_en_prefers_passage(self):
+        self.wxr.wtp.add_page(
+            "Template:quote-book",
+            10,
+            """<span class=\"h-quotation\">"
+            "<span class=\"e-quotation\" lang=\"de\">{{{origtext|}}}</span>"
+            "<span class=\"e-translation\">{{{passage|}}}</span>"
+            "</span>""",
+        )
+        page_data = parse_page(
+            self.wxr,
+            "lay",
+            """==English==
+===Verb===
+# gloss
+#: {{quote-book|author=Alice Stern|origtext=de:Eine ausgewachsene Henne '''legt''' Eier.|passage=A grown hen lays eggs.}}
+""",
+        )
+        self.assertEqual(
+            page_data[0]["senses"][0]["examples"],
+            [
+                {
+                    "text": "A grown hen lays eggs.",
+                    "english": "A grown hen lays eggs.",
+                    "translation": "A grown hen lays eggs.",
+                    "type": "example",
+                }
+            ],
+        )
